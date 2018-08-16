@@ -1723,16 +1723,25 @@ $$""".format(name, ' '.join(options)), name, password, password)
         * sync: set of nodes potentially being synced to
         * active: set of nodes that are sync capable
         """
-        sync_standby_names = self.query("SHOW synchronous_standby_names")
+        cursor = self.query("SHOW synchronous_standby_names")
+        sync_standby_names = cursor.fetchone()[0]
+
         result = parse_sync_standby_names(sync_standby_names)
+        logger.info("result of synchronous_standby_names: %s", result)
 
         active = []
         members = {m.name.lower(): m for m in cluster.members}
-        current = None
-        for app_name, state, sync_state in self.query(
+
+        for cursor in self.query(
                 """SELECT LOWER(application_name), state, sync_state 
                      FROM pg_stat_replication
                      ORDER BY flush_{0} DESC""".format(self.lsn_name)):
+            app_name = cursor[0]
+            state = cursor[1]
+            logger.info("app_name: %s", app_name)
+            logger.info("state: %s", state)
+            # sync_state = cursor[2]
+
             member = members.get(app_name)
             if state != 'streaming' or not member or member.tags.get('nosync', False):
                 continue
@@ -1763,31 +1772,49 @@ $$""".format(name, ' '.join(options)), name, password, password)
         TODO: Should we have a special synchronization mode that requires that all nodes that accept synchronization
         must also be eligible for failover?
         """
-
-        if num == 1 or num is None:
+        logger.info("trying to set_synchronous_state")
+        logger.info("num %s", num)
+        logger.info("sync %s", sync)
+        logger.info("self.name %s", self.name)
+        # if num == 1 or num is None:
             # Turn off sync replication
-            assert not sync or sync == set([self.name])
-            ssn = None
-        else:
-            assert self.name in sync
-            sync_standbys = sync.difference([self.name])
-            standby_list = ", ".join(sorted(sync_standbys)) if sync_standbys else "*"
-            if self.use_multiple_sync:
-                ssn = "{0}{1} ({2})".format("ANY " if self.use_quorum_commit else "", num - 1, standby_list)
-            else:
-                assert num == 2
-                ssn = standby_list
+        #    assert not sync or sync == set([self.name])
+        #    ssn = None
+        # else:
+            # really can get the point of this
+            # assert self.name in sync
+        # escaping the name of each standby
+        sync_standbys = ["\"" + standby + "\"" for standby in sync.difference([self.name])]
+        standby_list = ", ".join(sorted(sync_standbys)) if sync_standbys else "*"
 
-        if ssn != self._synchronous_standby_names:
-            if ssn is None:
-                self._server_parameters.pop('synchronous_standby_names', None)
+        logger.info("sync_standbys %s", sync_standbys)
+        logger.info("standby_list %s", standby_list)
+
+        if self.use_multiple_sync:
+            if sync_standbys:
+                ssn = "{0}{1} ({2})".format("ANY " if self.use_quorum_commit else "", num, standby_list)
+            # some kind of wa in case of some node is died
             else:
-                self._server_parameters['synchronous_standby_names'] = ssn
-            self._synchronous_standby_names = ssn
-            if self.state == 'running':
-                self._write_postgresql_conf()
-                self.reload()
-                # TODO: wait for configuration change to be applied
+                ssn = ""
+        else:
+            assert num == 2
+            ssn = standby_list
+
+        logger.info("ssn %s", ssn)
+        logger.info("self._synchronous_standby_names %s", self._synchronous_standby_names)
+
+        #if ssn != self._synchronous_standby_names:
+        logger.info("sync_standbys %s", sync_standbys)
+        if ssn is None:
+            self._server_parameters.pop('synchronous_standby_names', None)
+        else:
+            self._server_parameters['synchronous_standby_names'] = ssn
+        self._synchronous_standby_names = ssn
+        if self.state == 'running':
+            self._write_postgresql_conf()
+            self.reload()
+            time.sleep(1)
+            # TODO: wait for configuration change to be applied
 
     @staticmethod
     def postgres_version_to_int(pg_version):

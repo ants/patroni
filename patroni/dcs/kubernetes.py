@@ -323,6 +323,9 @@ class Kubernetes(AbstractDCS):
     def manual_failover(self, leader, candidate, scheduled_at=None, index=None):
         annotations = {'leader': leader or None, 'member': candidate or None, 'scheduled_at': scheduled_at}
         patch = bool(self.cluster and isinstance(self.cluster.failover, Failover) and self.cluster.failover.index)
+        logger.info('annotations: %s', annotations)
+        logger.info('patch: %s', patch)
+        logger.info('self.failover_path: %s', self.failover_path)
         return self.patch_or_create(self.failover_path, annotations, index, bool(index or patch), False)
 
     def set_config_value(self, value, index=None):
@@ -376,6 +379,10 @@ class Kubernetes(AbstractDCS):
 
     def write_sync_state(self, leader, sync_standby, index=None):
         return self.patch_or_create(self.sync_path, self.sync_state(leader, sync_standby), index, False)
+
+    def write_sync_state_new(self, leader, quorum, members, index=None):
+        sync_state = self.sync_state_new(leader, quorum, members)
+        return self.patch_or_create(self.sync_path, sync_state, index, False)
 
     def delete_sync_state(self, index=None):
         return self.write_sync_state(None, None, index)
