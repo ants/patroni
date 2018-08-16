@@ -1784,8 +1784,9 @@ $$""".format(name, ' '.join(options)), name, password, password)
             # really can get the point of this
             # assert self.name in sync
         # escaping the name of each standby
-        sync_standbys = ["\"" + standby + "\"" for standby in sync.difference([self.name])]
-        standby_list = ", ".join(sorted(sync_standbys)) if sync_standbys else "*"
+        if sync:
+            sync_standbys = ["\"" + standby + "\"" for standby in sync.difference([self.name])]
+            standby_list = ", ".join(sorted(sync_standbys)) if sync_standbys else "*"
 
         logger.info("sync_standbys %s", sync_standbys)
         logger.info("standby_list %s", standby_list)
