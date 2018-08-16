@@ -1784,12 +1784,14 @@ $$""".format(name, ' '.join(options)), name, password, password)
             # really can get the point of this
             # assert self.name in sync
         # escaping the name of each standby
+        standby_list = []
+        sync_standbys = []
+
         if sync:
             sync_standbys = ["\"" + standby + "\"" for standby in sync.difference([self.name])]
             standby_list = ", ".join(sorted(sync_standbys)) if sync_standbys else "*"
-
-        logger.info("sync_standbys %s", sync_standbys)
-        logger.info("standby_list %s", standby_list)
+            logger.info("sync_standbys %s", sync_standbys)
+            logger.info("standby_list %s", standby_list)
 
         if self.use_multiple_sync:
             if sync_standbys:
@@ -1799,7 +1801,7 @@ $$""".format(name, ' '.join(options)), name, password, password)
                 ssn = ""
         else:
             assert num == 2
-            ssn = standby_list
+            ssn = standby_list or None
 
         logger.info("ssn %s", ssn)
         logger.info("self._synchronous_standby_names %s", self._synchronous_standby_names)
