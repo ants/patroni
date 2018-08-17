@@ -321,7 +321,7 @@ class Kubernetes(AbstractDCS):
         """Unused"""
 
     def manual_failover(self, leader, candidate, scheduled_at=None, index=None):
-        annotations = {'leader': leader or '', 'member': candidate or '', 'scheduled_at': scheduled_at or ''}
+        annotations = {'leader': leader or 'null', 'member': candidate or 'null', 'scheduled_at': scheduled_at or 'null'}
         patch = bool(self.cluster and isinstance(self.cluster.failover, Failover) and self.cluster.failover.index)
         logger.info('annotations: %s', annotations)
         logger.info('patch: %s', patch)
