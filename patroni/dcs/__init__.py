@@ -285,7 +285,8 @@ class SyncState(namedtuple('SyncState', 'index,leader,quorum,members')):
 
             if 'members' in data:
                 quorum = int(data['quorum'])
-                members = frozenset(str(m) for m in data['members'])
+                logger.info("data %s", data)
+                members = frozenset(data['members'].split(','))
             else:
                 # Interpret state from older version correctly
                 quorum = 1
@@ -605,9 +606,17 @@ class AbstractDCS(object):
         """Build sync_state dict"""
         return {'leader': leader, 'sync_standby': sync_standby}
 
+    @staticmethod
+    def sync_state_new(leader, quorum, members):
+        return {'leader': leader, 'quorum': str(quorum), 'members': ', '.join(members) if members else ""}
+
     def write_sync_state(self, leader, sync_standby, index=None):
         sync_value = self.sync_state(leader, sync_standby)
         return self.set_sync_state_value(json.dumps(sync_value, separators=(',', ':')), index)
+
+    @abc.abstractmethod
+    def write_sync_state_new(self, leader, quorum, members, index):
+        """"""
 
     @abc.abstractmethod
     def set_history_value(self, value):

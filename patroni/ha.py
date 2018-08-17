@@ -313,41 +313,60 @@ class Ha(object):
         if self.is_synchronous_mode():
             sync_state = self.state_handler.current_sync_state(self.cluster)
 
-            min_sync = self.patroni.config['minimum_replication_factor']
-            sync_wanted = max(self.patroni.config['replication_factor'], min_sync)
-
-            # Versions before 9.6 only support synchronous replication to one node
-            if not self.state_handler.use_multiple_sync:
-                sync_wanted = min(sync_wanted, 2)
-                min_sync = min(min_sync, 2)
-
             if self.cluster.sync.is_empty:
                 quorum, voters = 1, frozenset([self.state_handler.name])
             else:
+                logger.info("quorum and voters is set from cluster state")
+                logger.info("voters %s ", self.cluster.sync.members)
+                logger.info("quorum %s ", self.cluster.sync.quorum)
                 quorum, voters = self.cluster.sync.quorum, self.cluster.sync.members
 
-            for transition, num, nodes in QuorumStateResolver(quorum=quorum,
-                                                              voters=voters,
-                                                              numsync=sync_state['numsync'],
-                                                              sync=sync_state['sync'],
-                                                              active=sync_state['active'],
-                                                              sync_wanted=sync_wanted):
-                if transition == 'quorum':
-                    logger.info("Setting quorum to %d of %d (%s)", num, len(nodes), ", ".join(sorted(nodes)))
-                    if not self.dcs.write_sync_state(leader=self.state_handler.name, quorum=num, members=list(nodes),
-                                                     index=self.cluster.sync.index):
-                        logger.info('Synchronous replication key updated by someone else.')
-                        return
-                elif transition == 'sync':
-                    logger.info("Setting synchronous replication to %d of %d (%s)",
-                                num, len(nodes), ", ".join(sorted(nodes)))
-                    # Bump up number of num nodes to meet minimum replication factor. Commits will have to wait until
-                    # we have enough nodes to meet replication target.
-                    if num < min_sync:
-                        logger.warning("Replication factor %d requested, but only %d synchronous nodes available.",
-                                       min_sync, num)
-                        num = min_sync
-                    self.state_handler.set_synchronous_state(num, nodes)
+            # Versions before 9.6 only support synchronous replication to one node
+            # if not self.state_handler.use_multiple_sync:
+            #    sync_wanted = min(num, 2)
+            #    min_sync = min(min_sync, 2)
+
+            # voters from pg_stat_replication
+            voters = sync_state['active']
+            # members from pg conf
+            members = sync_state['members']
+            # members in dcs
+            # dcs_members = self.cluster.sync.members
+
+            # as a part of prototype lets pretend that all of the voters (possible replicas to sync to)
+            # are should be sync
+            num = len(voters)
+
+            self.dcs.write_sync_state_new(leader=self.state_handler.name, quorum=num, members=voters,
+                                          index=self.cluster.sync.index)
+            if list(voters) != members:
+                self.state_handler.set_synchronous_state(num, voters)
+
+            # for transition, num, nodes in QuorumStateResolver(quorum=quorum,
+            #                                                   voters=voters,
+            #                                                   numsync=sync_state['numsync'],
+            #                                                   sync=sync_state['sync'],
+            #                                                   active=sync_state['active'],
+            #                                                   sync_wanted=sync_wanted):
+            #     # if transition == 'quorum':
+            #     logger.info("Setting quorum to %d of %d (%s)", num, len(nodes), ", ".join(sorted(nodes)))
+            #     logger.info("leader %s quorum %s members %s index %s", self.state_handler.name, num, list(nodes),
+            #     self.cluster.sync.index)
+            #     if not self.dcs.write_sync_state_new(leader=self.state_handler.name, quorum=num, members=list(nodes),
+            #                                      index=self.cluster.sync.index):
+            #         logger.info('Synchronous replication key updated by someone else.')
+            #         return
+            #     elif transition == 'sync':
+            #         logger.info("Setting synchronous replication to %d of %d (%s)",
+            #                     num, len(nodes), ", ".join(sorted(nodes)))
+            #         # Bump up number of num nodes to meet minimum replication factor. Commits will have to wait until
+            #         # we have enough nodes to meet replication target.
+            #         if num < min_sync:
+            #             logger.warning("Replication factor %d requested, but only %d synchronous nodes available.",
+            #                            min_sync, num)
+            #             num = min_sync
+            #         self.state_handler.set_synchronous_state(num, nodes)
+
         else:
             self.disable_synchronous_replication()
 
@@ -374,7 +393,7 @@ class Ha(object):
             numsync = 2 if self.patroni.config['minimum_replication_factor'] > 1 else 1
             self.state_handler.set_synchronous_state(numsync, set([self.state_handler.name]))
 
-            if self.dcs.write_sync_state(leader=self.state_handler.name,
+            if self.dcs.write_sync_state_new(leader=self.state_handler.name,
                                              quorum=1, members=[self.state_handler.name],
                                              index=self.cluster.sync.index):
                 # TODO: would be nice if we could get the new sync state while writing and update the state locally.
@@ -447,7 +466,7 @@ class Ha(object):
                         line.append(cluster_history[line[0]][3])
                 self.dcs.set_history_value(json.dumps(history, separators=(',', ':')))
 
-    def enforce_master_role(self, Fdef message, promote_message):
+    def enforce_master_role(self, message, promote_message):
         if not self.is_paused() and not self.watchdog.is_running and not self.watchdog.activate():
             if self.state_handler.is_leader():
                 self.demote('immediate')
@@ -467,10 +486,11 @@ class Ha(object):
             self.process_sync_replication()
             return message
         else:
-            if not self.process_sync_replication_prepromote():
+            # from my point of view only master should change sync names
+            # if not self.process_sync_replication_prepromote():
                 # Somebody else updated sync state, it may be due to us losing the lock. To be safe, postpone
                 # promotion until next cycle. TODO: trigger immediate retry of run_cycle
-                return 'Postponing promotion because synchronous replication state was updated by somebody else'
+            #    return 'Postponing promotion because synchronous replication state was updated by somebody else'
             if self.state_handler.role != 'master':
                 self._async_executor.schedule('promote')
                 self._async_executor.run_async(self.state_handler.promote, args=(self.dcs.loop_wait,))
